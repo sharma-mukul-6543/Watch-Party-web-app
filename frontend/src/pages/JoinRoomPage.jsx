@@ -20,13 +20,22 @@ export default function JoinRoomPage() {
 
     try {
       const room = await joinRoom({
-        name,
-        roomCode: roomCode.trim().toUpperCase(),
-      });
+  name: name.trim(),
+  roomCode: roomCode.trim().toUpperCase(),
+});
 
-      setRoom(room);
+setRoom(room);
 
-      navigate(`/lobby/${room.roomCode}`);
+// Save session
+localStorage.setItem(
+  "watchPartySession",
+  JSON.stringify({
+    roomCode: room.roomCode,
+    name: name.trim(),
+  })
+);
+
+navigate(`/lobby/${room.roomCode}`);
     } catch (err) {
       setError(err.message || "Failed to join room");
     } finally {

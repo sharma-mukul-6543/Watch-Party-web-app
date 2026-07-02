@@ -20,13 +20,23 @@ export default function CreateRoomPage() {
 
     try {
       const room = await createRoom({
-        hostName,
-        roomName,
-      });
+  hostName,
+  roomName,
+});
 
-      setRoom(room);
+setRoom(room);
 
-      navigate(`/lobby/${room.roomCode}`);
+localStorage.setItem(
+  "watchPartySession",
+  JSON.stringify({
+    roomCode: room.roomCode,
+    name: hostName.trim(),
+  })
+);
+
+console.log("Session saved:", localStorage.getItem("watchPartySession"));
+
+navigate(`/lobby/${room.roomCode}`);
     } catch (err) {
       setError(err.message || "Failed to create room");
     } finally {

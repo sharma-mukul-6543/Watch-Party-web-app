@@ -1,4 +1,4 @@
-import rooms from "./roomStore.js";
+import rooms, { disconnectTimers } from "./roomStore.js";
 import { generateRoomCode } from "../utils/generateRoomCode.js";
 
 export default function initializeSocket(io) {
@@ -40,9 +40,10 @@ export default function initializeSocket(io) {
 
         // ✅ IMPORTANT: VIDEO STATE
         videoState: {
-          currentTime: 0,
-          isPlaying: false,
-        },
+  currentTime: 0,
+  paused: true,
+  playbackRate: 1,
+},
       };
 
       rooms.set(roomCode, room);
@@ -57,36 +58,62 @@ export default function initializeSocket(io) {
     // =========================
     // JOIN ROOM
     // =========================
-    socket.on("join-room", (payload, callback) => {
-      const { roomCode, name } = payload || {};
+  socket.on("join-room", (payload, callback) => {
+  const { roomCode, name } = payload || {};
 
-      const room = rooms.get(roomCode);
+  const room = rooms.get(roomCode);
 
-      if (!room) {
-        return callback({
-          success: false,
-          message: "Room not found.",
-        });
-      }
-
-      const participant = {
-        socketId: socket.id,
-        name: name.trim(),
-        isHost: false,
-      };
-
-      room.participants.push(participant);
-
-      rooms.set(roomCode, room);
-      socket.join(roomCode);
-
-      io.to(roomCode).emit("room-updated", room);
-
-      callback({
-        success: true,
-        room,
-      });
+  if (!room) {
+    return callback({
+      success: false,
+      message: "Room not found.",
     });
+  }
+
+  const trimmedName = name.trim();
+
+  // Cancel pending removal if this user refreshed
+  const timerKey = `${roomCode}:${trimmedName}`;
+
+  if (disconnectTimers.has(timerKey)) {
+    clearTimeout(disconnectTimers.get(timerKey));
+    disconnectTimers.delete(timerKey);
+  }
+
+  // Find existing participant
+  let participant = room.participants.find(
+    (p) => p.name === trimmedName
+  );
+
+  if (participant) {
+    participant.socketId = socket.id;
+  } else {
+    participant = {
+      socketId: socket.id,
+      name: trimmedName,
+      isHost: room.hostName === trimmedName,
+    };
+
+    room.participants.push(participant);
+  }
+
+  // Restore host socket
+  if (room.hostName === trimmedName) {
+    room.hostSocketId = socket.id;
+    participant.isHost = true;
+  }
+
+  rooms.set(roomCode, room);
+
+  socket.join(roomCode);
+
+  io.to(roomCode).emit("room-updated", room);
+
+  callback({
+    success: true,
+    room,
+  });
+});
 
     // =========================
     // GET ROOM
@@ -107,88 +134,116 @@ export default function initializeSocket(io) {
       });
     });
 
-    // =========================
-    // VIDEO SYNC + STATE STORAGE
-    // =========================
+// =========================
+// VIDEO META
+// =========================
+socket.on("video-meta", ({ roomCode, meta }) => {
+  const room = rooms.get(roomCode);
 
-    socket.on("video-play", ({ roomCode, currentTime }) => {
-      const room = rooms.get(roomCode);
-      if (!room) return;
+  if (!room) return;
 
-      room.videoState = {
-        currentTime,
-        isPlaying: true,
-      };
+  const participant = room.participants.find(
+    (p) => p.socketId === socket.id
+  );
 
-      rooms.set(roomCode, room);
+  if (!participant) return;
 
-      socket.to(roomCode).emit("video-play", {
-        currentTime,
-        timestamp: Date.now(),
-      });
-    });
+  participant.videoMeta = {
+    fileName: meta.fileName,
+    fileSize: meta.fileSize,
+  };
 
-    socket.on("video-pause", ({ roomCode, currentTime }) => {
-      const room = rooms.get(roomCode);
-      if (!room) return;
+  console.log("========== ROOM STATE ==========");
+  console.log(JSON.stringify(room, null, 2));
+  console.log("================================");
 
-      room.videoState = {
-        currentTime,
-        isPlaying: false,
-      };
+  rooms.set(roomCode, room);
 
-      rooms.set(roomCode, room);
+  io.to(roomCode).emit("room-updated", room);
+});
 
-      socket.to(roomCode).emit("video-pause", {
-        currentTime,
-        timestamp: Date.now(),
-      });
-    });
+// =========================
+// VIDEO SYNC
+// =========================
+socket.on("video-sync", ({ roomCode, senderId, state }) => {
 
-    socket.on("video-seek", ({ roomCode, currentTime }) => {
-      const room = rooms.get(roomCode);
-      if (!room) return;
+  console.log("✅ Backend received video-sync", {
+  roomCode,
+  senderId,
+  state,
+});
+  const room = rooms.get(roomCode);
 
-      room.videoState.currentTime = currentTime;
+  if (!room) return;
 
-      rooms.set(roomCode, room);
+  room.videoState = state;
 
-      socket.to(roomCode).emit("video-seek", {
-        currentTime,
-        timestamp: Date.now(),
-      });
-    });
+  rooms.set(roomCode, room);
+
+  console.log("VIDEO SYNC", {
+    senderId,
+    state,
+  });
+
+  socket.to(roomCode).emit("video-sync", {
+    senderId,
+    state,
+  });
+});
 
     // =========================
     // DISCONNECT
     // =========================
     socket.on("disconnect", () => {
-      console.log(`🔴 Client Disconnected: ${socket.id}`);
+  console.log(`🔴 Client Disconnected: ${socket.id}`);
 
-      for (const [roomCode, room] of rooms.entries()) {
-        const updated = room.participants.filter(
-          (p) => p.socketId !== socket.id
-        );
+  for (const [roomCode, room] of rooms.entries()) {
+    const participant = room.participants.find(
+      (p) => p.socketId === socket.id
+    );
 
-        if (updated.length === 0) {
-          rooms.delete(roomCode);
-          continue;
-        }
+    if (!participant) continue;
 
-        room.participants = updated;
+    const timerKey = `${roomCode}:${participant.name}`;
 
-        if (room.hostSocketId === socket.id && room.participants.length) {
-          const newHost = room.participants[0];
-          room.hostSocketId = newHost.socketId;
-          room.hostName = newHost.name;
-          newHost.isHost = true;
-        }
+    const timer = setTimeout(() => {
+      const latestRoom = rooms.get(roomCode);
 
-        rooms.set(roomCode, room);
+      if (!latestRoom) return;
 
-        io.to(roomCode).emit("room-updated", room);
+      latestRoom.participants = latestRoom.participants.filter(
+        (p) => p.name !== participant.name
+      );
+
+      if (latestRoom.participants.length === 0) {
+        rooms.delete(roomCode);
+        disconnectTimers.delete(timerKey);
+        return;
       }
-    });
+
+      // Host really left (after 15 sec)
+      if (latestRoom.hostName === participant.name) {
+        const newHost = latestRoom.participants[0];
+
+        latestRoom.hostName = newHost.name;
+        latestRoom.hostSocketId = newHost.socketId;
+        newHost.isHost = true;
+      }
+
+      rooms.set(roomCode, latestRoom);
+
+      io.to(roomCode).emit("room-updated", latestRoom);
+
+      disconnectTimers.delete(timerKey);
+
+      console.log(
+        `❌ Removed ${participant.name} from room ${roomCode}`
+      );
+    }, 15000);
+
+    disconnectTimers.set(timerKey, timer);
+  }
+});
   });
 
   console.log("✅ Socket.io initialized");

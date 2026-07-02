@@ -2,16 +2,25 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 
-import App from "./App.jsx";
+import App from "./App";
+
+import { RoomProvider } from "./context/RoomProvider";
+
+import { socket } from "./socket/socket";
+
 import "./index.css";
-import { RoomProvider } from "./context/RoomProvider.jsx";
+
+// Connect socket once when application starts
+if (!socket.connected) {
+  socket.connect();
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <RoomProvider>
-      <BrowserRouter>
+    <BrowserRouter>
+      <RoomProvider>
         <App />
-      </BrowserRouter>
-    </RoomProvider>
+      </RoomProvider>
+    </BrowserRouter>
   </React.StrictMode>
 );

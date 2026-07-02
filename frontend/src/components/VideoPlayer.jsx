@@ -1,165 +1,269 @@
 import { useEffect, useRef, useState } from "react";
-import { useRoom } from "../context/useRoom";
 import { socket } from "../socket/socketService";
+import { useRoom } from "../context/useRoom";
 
 export default function VideoPlayer() {
   const { room } = useRoom();
 
   const videoRef = useRef(null);
-  const [videoUrl, setVideoUrl] = useState("");
 
-  const isHost = room?.hostSocketId === socket.id;
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [myVideo, setMyVideo] = useState(null);
+
+  // Prevent rebroadcast loop
   const isRemoteUpdate = useRef(false);
 
-  // =========================
-  // LOCAL FILE (HOST ONLY)
-  // =========================
-  function handleFileChange(e) {
+  // ==========================
+  // Cleanup Blob URL
+  // ==========================
+
+  useEffect(() => {
+    return () => {
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+    };
+  }, [videoUrl]);
+
+  // ==========================
+  // Select Local Movie
+  // ==========================
+
+  function handleVideoSelect(e) {
     const file = e.target.files?.[0];
-    if (!file) return;
+
+    if (!file || !room) return;
 
     const url = URL.createObjectURL(file);
+
     setVideoUrl(url);
-  }
 
-  // =========================
-  // EMIT SYNC EVENTS (HOST ONLY)
-  // =========================
-  function emitPlay() {
-    if (!isHost || !room || isRemoteUpdate.current) return;
+    const meta = {
+      fileName: file.name,
+      fileSize: file.size,
+    };
 
-    socket.emit("video-play", {
+    setMyVideo(meta);
+
+    socket.emit("video-meta", {
       roomCode: room.roomCode,
-      currentTime: videoRef.current.currentTime,
+      meta,
     });
   }
 
-  function emitPause() {
-    if (!isHost || !room || isRemoteUpdate.current) return;
+  // ==========================
+  // Broadcast current playback state
+  // ==========================
 
-    socket.emit("video-pause", {
-      roomCode: room.roomCode,
+  function broadcastVideoState() {
+  if (!videoRef.current || !room) return;
+
+  const payload = {
+    roomCode: room.roomCode,
+    senderId: socket.id,
+    state: {
       currentTime: videoRef.current.currentTime,
-    });
-  }
+      paused: videoRef.current.paused,
+      playbackRate: videoRef.current.playbackRate,
+    },
+  };
 
-  function emitSeek() {
-    if (!isHost || !room || isRemoteUpdate.current) return;
+  console.log("📤 EMITTING", payload);
 
-    socket.emit("video-seek", {
-      roomCode: room.roomCode,
-      currentTime: videoRef.current.currentTime,
-    });
-  }
+  socket.emit("video-sync", payload);
+}
+  // ==========================
+  // Listen to local playback changes
+  // ==========================
 
-  // =========================
-  // RECEIVE SYNC EVENTS
-  // =========================
   useEffect(() => {
-    function onPlay({ currentTime }) {
-      if (!videoRef.current) return;
+    console.log("Video Ref =", videoRef.current);
 
-      isRemoteUpdate.current = true;
+    const video = videoRef.current;
 
-      videoRef.current.currentTime = currentTime;
-      videoRef.current.play().catch(() => {});
-
-      setTimeout(() => {
-        isRemoteUpdate.current = false;
-      }, 300);
+    if (!video) {
+        console.log("Video is NULL");
+        return;
     }
 
-    function onPause({ currentTime }) {
-      if (!videoRef.current) return;
+    console.log("Attaching listeners");
 
-      isRemoteUpdate.current = true;
+    function handleLocalChange() {
+  if (isRemoteUpdate.current) {
+    console.log("Ignoring remote update");
+    return;
+  }
 
-      videoRef.current.currentTime = currentTime;
-      videoRef.current.pause();
+  console.log("EVENT FIRED");
 
-      setTimeout(() => {
-        isRemoteUpdate.current = false;
-      }, 300);
-    }
+  broadcastVideoState();
+}
 
-    function onSeek({ currentTime }) {
-      if (!videoRef.current) return;
-
-      isRemoteUpdate.current = true;
-
-      videoRef.current.currentTime = currentTime;
-
-      setTimeout(() => {
-        isRemoteUpdate.current = false;
-      }, 300);
-    }
-
-    socket.on("video-play", onPlay);
-    socket.on("video-pause", onPause);
-    socket.on("video-seek", onSeek);
+    video.addEventListener("play", handleLocalChange);
+    video.addEventListener("pause", handleLocalChange);
+    video.addEventListener("seeked", handleLocalChange);
+    video.addEventListener("ratechange", handleLocalChange);
 
     return () => {
-      socket.off("video-play", onPlay);
-      socket.off("video-pause", onPause);
-      socket.off("video-seek", onSeek);
+        video.removeEventListener("play", handleLocalChange);
+        video.removeEventListener("pause", handleLocalChange);
+        video.removeEventListener("seeked", handleLocalChange);
+        video.removeEventListener("ratechange", handleLocalChange);
+    };
+}, [room]);
+
+  // ==========================
+  // Receive sync from another participant
+  // ==========================
+
+  useEffect(() => {
+    function handleVideoSync({ senderId, state }) {
+
+        console.log("📥 Received Sync", {
+  senderId,
+  myId: socket.id,
+  state,
+});
+      if (!videoRef.current) return;
+
+      if (senderId === socket.id) return;
+
+      const video = videoRef.current;
+
+      isRemoteUpdate.current = true;
+
+      video.playbackRate = state.playbackRate;
+      video.currentTime = state.currentTime;
+
+      if (state.paused) {
+        video.pause();
+      } else {
+        video.play().catch(() => {});
+      }
+
+      setTimeout(() => {
+    isRemoteUpdate.current = false;
+}, 200);
+    }
+
+    socket.on("video-sync", handleVideoSync);
+
+    return () => {
+      socket.off("video-sync", handleVideoSync);
     };
   }, []);
 
-  // =========================
-  // AUTO SYNC ON JOIN (IMPORTANT)
-  // =========================
-  useEffect(() => {
-    if (!room || !videoRef.current) return;
-
-    socket.emit("get-room", { roomCode: room.roomCode }, (res) => {
-      if (!res?.success) return;
-
-      const r = res.room;
-
-      // If host is playing video, sync joiner
-      if (r.videoState?.currentTime) {
-        videoRef.current.currentTime = r.videoState.currentTime;
-      }
-
-      if (r.videoState?.isPlaying) {
-        videoRef.current.play().catch(() => {});
-      } else {
-        videoRef.current.pause();
-      }
-    });
-  }, [room]);
-
   return (
-    <div className="rounded-xl bg-slate-900 p-6">
+        <div className="bg-slate-900 rounded-xl p-5">
 
-      <h2 className="mb-4 text-xl font-bold">
-        Video Player
+      <h2 className="text-2xl font-bold mb-5">
+        Local Movie
       </h2>
 
-      {/* HOST FILE INPUT */}
-      {isHost ? (
-        <input
-          type="file"
-          accept="video/*"
-          onChange={handleFileChange}
-          className="mb-4 w-full rounded bg-slate-800 p-2"
-        />
-      ) : (
-        <div className="mb-4 text-slate-400">
-          Waiting for host to load video...
+      <input
+        type="file"
+        accept="video/*"
+        onChange={handleVideoSelect}
+        className="mb-5 block w-full"
+      />
+
+      {myVideo && (
+        <div className="bg-slate-800 rounded-lg p-3 mb-5">
+          <p>
+            <strong>Your Movie:</strong> {myVideo.fileName}
+          </p>
+
+          <p>
+            <strong>Size:</strong>{" "}
+            {(myVideo.fileSize / 1024 / 1024).toFixed(2)} MB
+          </p>
         </div>
       )}
 
-      {/* VIDEO */}
-      <video
-        ref={videoRef}
-        src={videoUrl}
-        controls
-        className="w-full rounded-lg bg-black"
-        onPlay={emitPlay}
-        onPause={emitPause}
-        onSeeked={emitSeek}
-      />
+     <video
+  ref={videoRef}
+  src={videoUrl || undefined}
+  controls
+  className="w-full rounded-lg bg-black"
+  onPlay={() => {
+    console.log("PLAY EVENT");
+    broadcastVideoState();
+  }}
+  onPause={() => {
+    console.log("PAUSE EVENT");
+    broadcastVideoState();
+  }}
+  onSeeked={() => {
+    console.log("SEEK EVENT");
+    broadcastVideoState();
+  }}
+  onRateChange={() => {
+    console.log("RATE EVENT");
+    broadcastVideoState();
+  }}
+/>
+      <div className="mt-6 bg-slate-800 rounded-lg p-4">
+
+        <h3 className="text-lg font-bold mb-3">
+          Participants' Movies
+        </h3>
+
+        {room?.participants?.length ? (
+          room.participants.map((participant) => {
+            const sameMovie =
+              myVideo &&
+              participant.videoMeta &&
+              participant.videoMeta.fileName === myVideo.fileName &&
+              participant.videoMeta.fileSize === myVideo.fileSize;
+
+            return (
+              <div
+                key={participant.socketId}
+                className="flex justify-between items-center border-b border-slate-700 py-2"
+              >
+                <div>
+                  <span className="font-medium">
+                    {participant.name}
+                    {participant.isHost && " 👑"}
+                  </span>
+                </div>
+
+                <div className="text-right">
+                  {participant.videoMeta ? (
+                    <>
+                      <p className="text-sm">
+                        {participant.videoMeta.fileName}
+                      </p>
+
+                      <p
+                        className={`text-xs ${
+                          sameMovie
+                            ? "text-green-400"
+                            : "text-yellow-400"
+                        }`}
+                      >
+                        {sameMovie
+                          ? "✅ Same Movie"
+                          : "⚠ Different Movie"}
+                      </p>
+                    </>
+                  ) : (
+                    <span className="text-gray-400 text-sm">
+                      Waiting for movie...
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <p className="text-gray-400">
+            No participants yet.
+          </p>
+        )}
+
+      </div>
+
     </div>
   );
 }

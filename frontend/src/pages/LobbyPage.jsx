@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { socket } from "../socket/socketService";
 import { useRoom } from "../context/useRoom";
+import { joinRoom, socket } from "../socket/socketService";
 import VideoPlayer from "../components/VideoPlayer";
 
 export default function LobbyPage() {
@@ -10,86 +10,146 @@ export default function LobbyPage() {
 
   const { room, setRoom } = useRoom();
 
-  // =========================
-  // BLOCK ACCESS WITHOUT ROOM
-  // =========================
+  // Restore room after refresh
   useEffect(() => {
-    if (!roomCode) {
-      navigate("/");
-      return;
-    }
-  }, [roomCode, navigate]);
+    async function restoreSession() {
+      const saved = localStorage.getItem("watchPartySession");
 
-  // =========================
-  // ROOM RECOVERY ON REFRESH
-  // =========================
-  useEffect(() => {
-    if (!roomCode) return;
+      if (!saved) {
+        navigate("/");
+        return;
+      }
 
-    socket.emit("get-room", { roomCode }, (res) => {
-      if (res?.success) {
-        setRoom(res.room);
-      } else {
+      const session = JSON.parse(saved);
+
+      if (session.roomCode !== roomCode) {
+        navigate("/");
+        return;
+      }
+
+      try {
+        const restoredRoom = await joinRoom({
+          roomCode: session.roomCode,
+          name: session.name,
+        });
+
+        setRoom(restoredRoom);
+      } catch (err) {
+        console.error(err);
+        localStorage.removeItem("watchPartySession");
         navigate("/");
       }
-    });
-  }, [roomCode, setRoom, navigate]);
-
-  // =========================
-  // LIVE ROOM UPDATES
-  // =========================
-  useEffect(() => {
-    function handleRoomUpdate(updatedRoom) {
-      setRoom(updatedRoom);
     }
 
-    socket.on("room-updated", handleRoomUpdate);
+    restoreSession();
+  }, [navigate, roomCode, setRoom]);
 
-    return () => {
-      socket.off("room-updated", handleRoomUpdate);
-    };
-  }, [setRoom]);
+  // Live room updates
+  useEffect(() => {
+  function handleRoomUpdate(updatedRoom) {
+    setRoom(updatedRoom);
+  }
 
-  // =========================
-  // SAFETY GUARD
-  // =========================
+  async function handleReconnect() {
+    const saved = localStorage.getItem("watchPartySession");
+
+    if (!saved) return;
+
+    const session = JSON.parse(saved);
+
+    try {
+      const restoredRoom = await joinRoom({
+        roomCode: session.roomCode,
+        name: session.name,
+      });
+
+      setRoom(restoredRoom);
+
+      console.log("✅ Rejoined socket room after reconnect");
+    } catch (err) {
+      console.error("Reconnect join failed:", err);
+    }
+  }
+
+  socket.on("room-updated", handleRoomUpdate);
+  socket.on("connect", handleReconnect);
+
+  return () => {
+    socket.off("room-updated", handleRoomUpdate);
+    socket.off("connect", handleReconnect);
+  };
+}, [setRoom]);
+
   if (!room) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-white">
-        Loading room...
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
+        Restoring room...
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-slate-950 text-white p-6">
+      <div className="max-w-7xl mx-auto">
 
-      {/* ROOM HEADER */}
-      <div className="max-w-5xl mx-auto rounded-xl bg-slate-900 p-6">
-        <h1 className="text-3xl font-bold">
-          🎬 {room.roomName}
-        </h1>
+        {/* Header */}
+        <div className="bg-slate-900 rounded-xl p-6 mb-6">
+          <h1 className="text-3xl font-bold">{room.roomName}</h1>
 
-        <p className="mt-2 text-slate-400">
-          Room Code: {room.roomCode}
-        </p>
+          <p className="text-slate-400 mt-2">
+            Room Code: <span className="font-semibold">{room.roomCode}</span>
+          </p>
 
-        <div className="mt-6 grid grid-cols-2 gap-4">
-          <div className="bg-slate-800 p-4 rounded-lg">
-            Host: {room.hostName}
+          <p className="text-slate-400">
+            Host:{" "}
+            <span className="text-green-400 font-semibold">
+              {room.hostName}
+            </span>
+          </p>
+        </div>
+
+        <div className="grid lg:grid-cols-4 gap-6">
+
+          {/* Video */}
+          <div className="lg:col-span-3">
+            <VideoPlayer />
           </div>
 
-          <div className="bg-slate-800 p-4 rounded-lg">
-            Participants: {room.participants.length}
+          {/* Participants */}
+          <div className="bg-slate-900 rounded-xl p-5 h-fit">
+            <h2 className="text-xl font-bold mb-4">
+              Participants ({room.participants.length})
+            </h2>
+
+            <div className="space-y-3">
+              {room.participants.map((participant) => (
+                <div
+                  key={participant.socketId}
+                  className="bg-slate-800 rounded-lg p-3 flex justify-between items-center"
+                >
+                  <div>
+                    <p className="font-semibold">
+                      {participant.name}
+                    </p>
+
+                    <p className="text-xs text-slate-400">
+                      {participant.isHost ? "Host" : "Participant"}
+                    </p>
+                  </div>
+
+                  {participant.isHost && (
+                    <span className="px-2 py-1 rounded bg-yellow-500 text-black text-xs font-bold">
+                      HOST
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+
           </div>
+
         </div>
       </div>
-
-      {/* VIDEO PLAYER */}
-      <div className="max-w-5xl mx-auto mt-6">
-        <VideoPlayer />
-      </div>
-
     </div>
   );
 }
