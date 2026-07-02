@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { useEffect, useRef, useState } from "react";
 import { socket } from "../socket/socketService";
 import { useRoom } from "../context/useRoom";
@@ -11,7 +12,7 @@ export default function VideoPlayer() {
   const [myVideo, setMyVideo] = useState(null);
 
   // Prevent rebroadcast loop
-  const isRemoteUpdate = useRef(false);
+  const isRemoteAction = useRef(false);
 
   // ==========================
   // Cleanup Blob URL
@@ -26,244 +27,289 @@ export default function VideoPlayer() {
   }, [videoUrl]);
 
   // ==========================
-  // Select Local Movie
-  // ==========================
+// Select Local Movie
+// ==========================
 
-  function handleVideoSelect(e) {
-    const file = e.target.files?.[0];
+function handleVideoSelect(e) {
+  const file = e.target.files?.[0];
 
-    if (!file || !room) return;
+  if (!file || !room) return;
 
-    const url = URL.createObjectURL(file);
+  const url = URL.createObjectURL(file);
 
-    setVideoUrl(url);
+  setVideoUrl(url);
 
-    const meta = {
-      fileName: file.name,
-      fileSize: file.size,
-    };
-
-    setMyVideo(meta);
-
-    socket.emit("video-meta", {
-      roomCode: room.roomCode,
-      meta,
-    });
-  }
-
-  // ==========================
-  // Broadcast current playback state
-  // ==========================
-
-  function broadcastVideoState() {
-  if (!videoRef.current || !room) return;
-
-  const payload = {
-    roomCode: room.roomCode,
-    senderId: socket.id,
-    state: {
-      currentTime: videoRef.current.currentTime,
-      paused: videoRef.current.paused,
-      playbackRate: videoRef.current.playbackRate,
-    },
+  const meta = {
+    fileName: file.name,
+    fileSize: file.size,
   };
 
-  console.log("📤 EMITTING", payload);
+  setMyVideo(meta);
 
-  socket.emit("video-sync", payload);
+  socket.emit("video-meta", {
+    roomCode: room.roomCode,
+    meta,
+  });
 }
-  // ==========================
-  // Listen to local playback changes
-  // ==========================
 
-  useEffect(() => {
-    console.log("Video Ref =", videoRef.current);
+// ======================================
+// PLAY
+// ======================================
 
-    const video = videoRef.current;
+function handlePlay() {
+  if (!room || !videoRef.current) return;
 
-    if (!video) {
-        console.log("Video is NULL");
-        return;
-    }
-
-    console.log("Attaching listeners");
-
-    function handleLocalChange() {
-  if (isRemoteUpdate.current) {
-    console.log("Ignoring remote update");
+  if (isRemoteAction.current) {
+    isRemoteAction.current = false;
     return;
   }
 
-  console.log("EVENT FIRED");
-
-  broadcastVideoState();
+  socket.emit("video-play", {
+    roomCode: room.roomCode,
+    currentTime: videoRef.current.currentTime,
+  });
 }
 
-    video.addEventListener("play", handleLocalChange);
-    video.addEventListener("pause", handleLocalChange);
-    video.addEventListener("seeked", handleLocalChange);
-    video.addEventListener("ratechange", handleLocalChange);
+// ======================================
+// PAUSE
+// ======================================
 
-    return () => {
-        video.removeEventListener("play", handleLocalChange);
-        video.removeEventListener("pause", handleLocalChange);
-        video.removeEventListener("seeked", handleLocalChange);
-        video.removeEventListener("ratechange", handleLocalChange);
-    };
-}, [room]);
+function handlePause() {
+  if (!room || !videoRef.current) return;
 
-  // ==========================
-  // Receive sync from another participant
-  // ==========================
+  if (isRemoteAction.current) {
+    isRemoteAction.current = false;
+    return;
+  }
 
-  useEffect(() => {
-    function handleVideoSync({ senderId, state }) {
+  socket.emit("video-pause", {
+    roomCode: room.roomCode,
+    currentTime: videoRef.current.currentTime,
+  });
+}
 
-        console.log("📥 Received Sync", {
-  senderId,
-  myId: socket.id,
-  state,
-});
-      if (!videoRef.current) return;
+// ======================================
+// SEEK
+// ======================================
 
-      if (senderId === socket.id) return;
+function handleSeeked() {
+  if (!room || !videoRef.current) return;
 
-      const video = videoRef.current;
+  if (isRemoteAction.current) {
+    isRemoteAction.current = false;
+    return;
+  }
 
-      isRemoteUpdate.current = true;
+  socket.emit("video-seek", {
+    roomCode: room.roomCode,
+    currentTime: videoRef.current.currentTime,
+  });
+}
 
-      video.playbackRate = state.playbackRate;
-      video.currentTime = state.currentTime;
+// ======================================
+// SPEED CHANGE
+// ======================================
 
-      if (state.paused) {
-        video.pause();
-      } else {
-        video.play().catch(() => {});
-      }
+function handleRateChange() {
+  if (!room || !videoRef.current) return;
 
-      setTimeout(() => {
-    isRemoteUpdate.current = false;
-}, 200);
-    }
+  if (isRemoteAction.current) {
+    isRemoteAction.current = false;
+    return;
+  }
 
-    socket.on("video-sync", handleVideoSync);
+  socket.emit("video-rate", {
+    roomCode: room.roomCode,
+    playbackRate: videoRef.current.playbackRate,
+  });
+}
 
-    return () => {
-      socket.off("video-sync", handleVideoSync);
-    };
-  }, []);
+// ======================================
+// RECEIVE PLAY
+// ======================================
+
+useEffect(() => {
+  function onPlay({ currentTime }) {
+    if (!videoRef.current) return;
+
+    isRemoteAction.current = true;
+
+    videoRef.current.currentTime = currentTime;
+
+    videoRef.current.play().catch(() => {});
+  }
+
+  socket.on("video-play", onPlay);
+
+  return () => socket.off("video-play", onPlay);
+}, []);
+
+// ======================================
+// RECEIVE PAUSE
+// ======================================
+
+useEffect(() => {
+  function onPause({ currentTime }) {
+    if (!videoRef.current) return;
+
+    isRemoteAction.current = true;
+
+    videoRef.current.currentTime = currentTime;
+
+    videoRef.current.pause();
+  }
+
+  socket.on("video-pause", onPause);
+
+  return () => socket.off("video-pause", onPause);
+}, []);
+
+// ======================================
+// RECEIVE SEEK
+// ======================================
+
+useEffect(() => {
+  function onSeek({ currentTime }) {
+    if (!videoRef.current) return;
+
+    isRemoteAction.current = true;
+
+    videoRef.current.currentTime = currentTime;
+
+    setTimeout(() => {
+      isRemoteAction.current = false;
+    }, 100);
+  }
+
+  socket.on("video-seek", onSeek);
+
+  return () => socket.off("video-seek", onSeek);
+}, []);
+
+// ======================================
+// RECEIVE SPEED
+// ======================================
+
+useEffect(() => {
+  function onRate({ playbackRate }) {
+    if (!videoRef.current) return;
+
+    isRemoteAction.current = true;
+
+    videoRef.current.playbackRate = playbackRate;
+
+    setTimeout(() => {
+      isRemoteAction.current = false;
+    }, 100);
+  }
+
+  socket.on("video-rate", onRate);
+
+  return () => socket.off("video-rate", onRate);
+}, []);
+    
 
   return (
-        <div className="bg-slate-900 rounded-xl p-5">
+  <div className="bg-slate-900 rounded-xl p-5">
 
-      <h2 className="text-2xl font-bold mb-5">
-        Local Movie
-      </h2>
+    <h2 className="text-2xl font-bold mb-5">
+      Local Movie
+    </h2>
 
-      <input
-        type="file"
-        accept="video/*"
-        onChange={handleVideoSelect}
-        className="mb-5 block w-full"
-      />
+    <input
+      type="file"
+      accept="video/*"
+      onChange={handleVideoSelect}
+      className="mb-5 block w-full"
+    />
 
-      {myVideo && (
-        <div className="bg-slate-800 rounded-lg p-3 mb-5">
-          <p>
-            <strong>Your Movie:</strong> {myVideo.fileName}
-          </p>
+    {myVideo && (
+      <div className="bg-slate-800 rounded-lg p-3 mb-5">
+        <p>
+          <strong>Your Movie:</strong> {myVideo.fileName}
+        </p>
 
-          <p>
-            <strong>Size:</strong>{" "}
-            {(myVideo.fileSize / 1024 / 1024).toFixed(2)} MB
-          </p>
-        </div>
+        <p>
+          <strong>Size:</strong>{" "}
+          {(myVideo.fileSize / 1024 / 1024).toFixed(2)} MB
+        </p>
+      </div>
+    )}
+
+    <video
+      ref={videoRef}
+      src={videoUrl || undefined}
+      controls
+      className="w-full rounded-lg bg-black"
+
+      onPlay={handlePlay}
+      onPause={handlePause}
+      onSeeked={handleSeeked}
+      onRateChange={handleRateChange}
+    />
+
+    <div className="mt-6 bg-slate-800 rounded-lg p-4">
+
+      <h3 className="text-lg font-bold mb-3">
+        Participants' Movies
+      </h3>
+
+      {room?.participants?.length ? (
+        room.participants.map((participant) => {
+          const sameMovie =
+            myVideo &&
+            participant.videoMeta &&
+            participant.videoMeta.fileName === myVideo.fileName &&
+            participant.videoMeta.fileSize === myVideo.fileSize;
+
+          return (
+            <div
+              key={participant.socketId}
+              className="flex justify-between items-center border-b border-slate-700 py-2"
+            >
+              <div>
+                <span className="font-medium">
+                  {participant.name}
+                  {participant.isHost && " 👑"}
+                </span>
+              </div>
+
+              <div className="text-right">
+                {participant.videoMeta ? (
+                  <>
+                    <p className="text-sm">
+                      {participant.videoMeta.fileName}
+                    </p>
+
+                    <p
+                      className={`text-xs ${
+                        sameMovie
+                          ? "text-green-400"
+                          : "text-yellow-400"
+                      }`}
+                    >
+                      {sameMovie
+                        ? "✅ Same Movie"
+                        : "⚠ Different Movie"}
+                    </p>
+                  </>
+                ) : (
+                  <span className="text-gray-400 text-sm">
+                    Waiting for movie...
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        <p className="text-gray-400">
+          No participants yet.
+        </p>
       )}
 
-     <video
-  ref={videoRef}
-  src={videoUrl || undefined}
-  controls
-  className="w-full rounded-lg bg-black"
-  onPlay={() => {
-    console.log("PLAY EVENT");
-    broadcastVideoState();
-  }}
-  onPause={() => {
-    console.log("PAUSE EVENT");
-    broadcastVideoState();
-  }}
-  onSeeked={() => {
-    console.log("SEEK EVENT");
-    broadcastVideoState();
-  }}
-  onRateChange={() => {
-    console.log("RATE EVENT");
-    broadcastVideoState();
-  }}
-/>
-      <div className="mt-6 bg-slate-800 rounded-lg p-4">
-
-        <h3 className="text-lg font-bold mb-3">
-          Participants' Movies
-        </h3>
-
-        {room?.participants?.length ? (
-          room.participants.map((participant) => {
-            const sameMovie =
-              myVideo &&
-              participant.videoMeta &&
-              participant.videoMeta.fileName === myVideo.fileName &&
-              participant.videoMeta.fileSize === myVideo.fileSize;
-
-            return (
-              <div
-                key={participant.socketId}
-                className="flex justify-between items-center border-b border-slate-700 py-2"
-              >
-                <div>
-                  <span className="font-medium">
-                    {participant.name}
-                    {participant.isHost && " 👑"}
-                  </span>
-                </div>
-
-                <div className="text-right">
-                  {participant.videoMeta ? (
-                    <>
-                      <p className="text-sm">
-                        {participant.videoMeta.fileName}
-                      </p>
-
-                      <p
-                        className={`text-xs ${
-                          sameMovie
-                            ? "text-green-400"
-                            : "text-yellow-400"
-                        }`}
-                      >
-                        {sameMovie
-                          ? "✅ Same Movie"
-                          : "⚠ Different Movie"}
-                      </p>
-                    </>
-                  ) : (
-                    <span className="text-gray-400 text-sm">
-                      Waiting for movie...
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        ) : (
-          <p className="text-gray-400">
-            No participants yet.
-          </p>
-        )}
-
-      </div>
-
     </div>
-  );
+
+  </div>
+);
 }
