@@ -23,11 +23,11 @@ export default function Navbar() {
 
           <div>
             <h1 className="text-xl font-bold tracking-wide">
-              Watch Party
+              Watch Movie
             </h1>
 
             <p className="text-xs text-slate-400">
-              Local Sync Mode
+              Sirf Apane Liye
             </p>
           </div>
         </Link>

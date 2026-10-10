@@ -9,13 +9,12 @@ export default function HomePage() {
         </div>
 
         <h1 className="mb-4 text-5xl font-extrabold tracking-tight">
-          Private Watch Party
+          Apun ka Theatre
         </h1>
 
         <p className="mx-auto mb-10 max-w-2xl text-lg leading-8 text-slate-400">
-          Watch movies together with perfectly synchronized playback.
-          Every participant plays their own local movie file while the
-          application keeps everyone in sync using Socket.io.
+          😉 Movie Dekhenge Akele Akele 🫣         
+                        
         </p>
 
         <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -37,7 +36,7 @@ export default function HomePage() {
         <div className="mt-14 grid gap-6 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
             <h3 className="mb-2 text-xl font-semibold">
-              ⚡ Instant Playback
+              ⚡ Turant Picture Chalega Bidu
             </h3>
 
             <p className="text-sm text-slate-400">
@@ -48,7 +47,7 @@ export default function HomePage() {
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
             <h3 className="mb-2 text-xl font-semibold">
-              🔄 Perfect Sync
+              🔄 Barabar Coordination ke saath 😎
             </h3>
 
             <p className="text-sm text-slate-400">
@@ -59,7 +58,7 @@ export default function HomePage() {
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
             <h3 className="mb-2 text-xl font-semibold">
-              🔒 Private Rooms
+              🔒 Private Rooms 🤫
             </h3>
 
             <p className="text-sm text-slate-400">
