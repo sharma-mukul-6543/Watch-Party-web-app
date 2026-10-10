@@ -1,0 +1,11 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://watch-party-backend.onrender.com/api/$1"
+    }
+  ],
+  "env": {
+    "VITE_BACKEND_URL": "https://watch-party-backend.onrender.com"
+  }
+}

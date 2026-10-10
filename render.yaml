@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: watch-party-backend
+    env: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: "5000"
+      - key: CLIENT_URL
+        value: "https://watch-party-frontend.vercel.app"
+    autoDeploy: true
+    pullRequestPreviews: true
+    healthCheckPath: /api/health
+    routes:
+      - type: static
+        src: /public
+        dest: public
