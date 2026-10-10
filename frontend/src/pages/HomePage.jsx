@@ -13,8 +13,8 @@ export default function HomePage() {
         </h1>
 
         <p className="mx-auto mb-10 max-w-2xl text-lg leading-8 text-slate-400">
-          😉 Movie Dekhenge Akele Akele 🫣         
-                        
+          😉 Mukul and anu's private theatre 🫣
+
         </p>
 
         <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
